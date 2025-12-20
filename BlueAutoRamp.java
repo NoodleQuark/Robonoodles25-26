@@ -31,9 +31,12 @@ package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.hardware.bosch.BHI260IMU;
 import com.qualcomm.hardware.bosch.BNO055IMU;
+import com.qualcomm.hardware.limelightvision.LLResult;
+import com.qualcomm.hardware.limelightvision.LLResultTypes;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
+import com.qualcomm.robotcore.hardware.AnalogInput;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.ColorSensor;
 import com.qualcomm.robotcore.hardware.DcMotor;
@@ -43,9 +46,13 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
+import org.firstinspires.ftc.robotcore.external.navigation.YawPitchRollAngles;
 import org.firstinspires.ftc.vision.VisionPortal;
 import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
 import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
+
+import com.qualcomm.hardware.limelightvision.Limelight3A;
 
 import java.util.List;
 
@@ -62,13 +69,14 @@ public class BlueAutoRamp extends LinearOpMode {
     private DcMotor flywheelLeft;
     private DcMotor intake;
     private DcMotor turret;
-    private Servo indexRight;
-    private Servo indexLeft;
-    private CRServo transferRight;
-    private CRServo transferLeft;
+    private CRServo indexRight;
+    private CRServo indexLeft;
     private ColorSensor colorSensor;
-    private BHI260IMU imu;
     private SimplifiedOdometryRobot odometry;
+
+    private Limelight3A limelight;
+    private IMU imu;
+    private AnalogInput spindexerEncoder;
 
     private ElapsedTime     runtime = new ElapsedTime();
 
@@ -89,25 +97,12 @@ public class BlueAutoRamp extends LinearOpMode {
             (WHEEL_DIAMETER_INCHES * 3.1415); // don't change this
     static final double     DRIVE_SPEED             = 0.4; // 0.35
 
-    private VisionPortal visionPortal;
-    private AprilTagProcessor aprilTag;
-
     private int id = 0;
-
 
 
     @Override
     public void runOpMode() {
 
-        aprilTag = new AprilTagProcessor.Builder().build();
-
-        visionPortal = new VisionPortal.Builder()
-                .setCamera(hardwareMap.get(WebcamName.class, "Webcam 1"))
-                .addProcessor(aprilTag)
-                .enableLiveView(true)
-                .build();
-
-        aprilTag.setDecimation(0);
 
         // Initialize the drive system variables.
         backLeft = hardwareMap.get(DcMotor.class, "leftback_drive");
@@ -118,14 +113,13 @@ public class BlueAutoRamp extends LinearOpMode {
         turret = hardwareMap.get(DcMotor.class, "turret");
         flywheelRight = hardwareMap.get(DcMotor.class, "flywheelRight");
         flywheelLeft = hardwareMap.get(DcMotor.class, "flywheelLeft");
-        indexRight = hardwareMap.get(Servo.class, "indexRight");
-        indexLeft = hardwareMap.get(Servo.class, "indexLeft");
-        transferRight = hardwareMap.get(CRServo.class, "transferRight");
-        transferLeft = hardwareMap.get(CRServo.class, "transferLeft");
-
+        indexRight = hardwareMap.get(CRServo.class, "indexRight");
+        indexLeft = hardwareMap.get(CRServo.class, "indexLeft");
         colorSensor = hardwareMap.get(ColorSensor.class, "color");
 
         imu = hardwareMap.get(BHI260IMU.class, "imu");
+        spindexerEncoder = hardwareMap.get(AnalogInput.class, "spindexerEncoder");
+
 
         IMU.Parameters imuParams = new IMU.Parameters(
                 new RevHubOrientationOnRobot(RevHubOrientationOnRobot.LogoFacingDirection.RIGHT, RevHubOrientationOnRobot.UsbFacingDirection.UP)
@@ -148,77 +142,48 @@ public class BlueAutoRamp extends LinearOpMode {
         backRight.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         backLeft.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
+// 22 SECONDS
+        limelight = hardwareMap.get(Limelight3A.class, "limelight");
+        limelight.pipelineSwitch(8); // arpil tag #11?
+        imu = hardwareMap.get(IMU.class, "imu");
+        RevHubOrientationOnRobot revHubOrientationOnRobot = new RevHubOrientationOnRobot(RevHubOrientationOnRobot.LogoFacingDirection.RIGHT, RevHubOrientationOnRobot.UsbFacingDirection.UP);
+        imu.initialize(new IMU.Parameters(revHubOrientationOnRobot));
+
+        limelight.start();
+
         // Wait for the game to start (driver presses START)
         waitForStart();
 
         //RUN CODE put the move stuff here
-        indexLeft.setPosition(0.01);
-        indexRight.setPosition(0.01);
-        flywheelLeft.setPower(-0.45);
-        flywheelRight.setPower(-0.45);
-        encoderDrive(0.4,-20, -20,-20, -20, 10);
-        sleep(500);
-        encoderDrive(0.4, 4, -4,4,-4,10);
-        camera(1000);
-        sleep(500);
-        encoderDrive(0.4, 1, -1,1,-1,10);
+        flywheelLeft.setPower(Constants.flywheelAuto);
+        flywheelRight.setPower(Constants.flywheelAuto);
+
+        forwardIMU(0.35,30,2.5,10);
+        encoderDrive(0.4, -10, 10,-10,10,10);
         camera(1000);
         telemetry.addData("AprilTagID", id);
         telemetry.update();
-        indexLeft.setPosition(index1);
-        indexRight.setPosition(index1);
+        sleep(1000);
+        encoderDrive(0.4, -5.5, 5.5,-5.5,5.5,10);
         sleep(200);
-        encoderDrive(0.35, -4, 4,-4,4,10);
+        while (sort(index1)){}
         sleep(500);
-        encoderDrive(0.5,3,3,3,3,10);
-        sleep(1000);
-        //up
-        transferLeft.setPower(1);
-        transferRight.setPower(-1);
-        sleep(1200);
-        //down
-        transferLeft.setPower(-1);
-        transferRight.setPower(1);
-        sleep(1200);
-        transferLeft.setPower(0);
-        transferRight.setPower(0);
-        sleep(200);
-        indexLeft.setPosition(index2);
-        indexRight.setPosition(index2);
-        sleep(1000);
-        //up
-        transferLeft.setPower(1);
-        transferRight.setPower(-1);
-        sleep(1200);
-        //down
-        transferLeft.setPower(-1);
-        transferRight.setPower(1);
-        sleep(1200);
-        transferLeft.setPower(0);
-        transferRight.setPower(0);
-        sleep(300);
-        indexLeft.setPosition(index3);
-        indexRight.setPosition(index3);
-        sleep(1000);
-        //up
-        transferLeft.setPower(1);
-        transferRight.setPower(-1);
-        sleep(1200);
-        //down
-        transferLeft.setPower(-1);
-        transferRight.setPower(1);
-        sleep(1200);
-        transferLeft.setPower(0);
-        transferRight.setPower(0);
-//        //RIGHT SIDE IS POSITIVE LEFT SIDE IS NEGATIVE FOR FORWARD
-//        // because the axles point in opposite directions so this is correct
+        while (!shoot(index1+120)){}
+        sleep(500);
+        while (!shoot(index1+240)){}
+        sleep(500);
+        while (sort(index1+120)){}
+        sleep(500);
+        while (!shoot(index1+360)){} //edit
+        sleep(500);
+        while (sort(index1)){}
 
         //inside triangle
-        //encoderDrive(0.8,-20, 20,20, -20, 10);
+        encoderDrive(0.8,14, -14,-14, 14, 10);
 
         //outside triangle
-        encoderDrive(0.5,5, -5,5, -5, 10);
-        encoderDrive(0.4,-10, -10,-10, -10, 10);
+//        encoderDrive(0.5,-7, 7,-7, 7, 10);
+//        encoderDrive(0.5,-15, -15,-15, -15, 10);
 
         telemetry.addData("Path", "Complete");
         telemetry.update();
@@ -364,43 +329,92 @@ public class BlueAutoRamp extends LinearOpMode {
             sleep(250);   // optional pause after each move.
         }
     }
-    private void camera(int duration) {
-        List<AprilTagDetection> detections = aprilTag.getDetections();
+    private void camera(int duration){
         long starttime = System.currentTimeMillis();
         while(System.currentTimeMillis()-starttime < duration){
-            detections = aprilTag.getDetections();
-            if (detections.isEmpty()) {
-                telemetry.addLine("No tags detected");
-                break;
-            } else {
+            YawPitchRollAngles orientation = imu.getRobotYawPitchRollAngles();
+            limelight.updateRobotOrientation(orientation.getYaw());
+            LLResult llResult = limelight.getLatestResult();
 
-                for (AprilTagDetection tag : detections) {
-                    id = tag.id;
+
+            if (llResult != null && llResult.isValid()){
+                Pose3D botPose = llResult.getBotpose_MT2();
+                telemetry.addData("Tx", llResult.getTx());
+                telemetry.addData("Ty", llResult.getTy());
+                telemetry.addData("Ta", llResult.getTa());
+                List<LLResultTypes.FiducialResult> detections = llResult.getFiducialResults();
+
+                if (detections != null && !detections.isEmpty()) {
+                    for (LLResultTypes.FiducialResult d : detections) {
+                        telemetry.addData("Tag ID", d.getFiducialId());
+                        id = d.getFiducialId();
+                    }
+                } else {
+                    telemetry.addData("Tag ID", "None");
                 }
-                switch (id){
-                    case 21:
-                        index1 = 0.01;
-                        index2 = 0.365;
-                        index3 = 0.75;
-                        break;
 
-                    case 22:
-                        index1 = 0.75;
-                        index2 = 0.01; // green
-                        index3 = 0.365;
-                        break;
+                telemetry.update();
+            }
+            switch (id){
+                case 21:
+                    index1 = 0;
+                    break;
 
-                    case 23:
-                        index1 = 0.365;
-                        index2 = 0.75;
-                        index3 = 0.01;
-                        break;
+                case 22:
+                    index1 = 120;
+                    break;
 
-                }
-                break;
+                case 23:
+                    index1 = 240;
+                    break;
+
             }
 
         }
     }
 
+    public boolean sort(double targetAngle) {
+        double current = getAngle();
+        double error = (((current - targetAngle) + 360) % 360);
+        /*telemetry.addData("current", current);
+        telemetry.addData("tart", targetAngle);
+        telemetry.addData("comp", (((current - targetAngle) + 360)));
+        telemetry.addData("error", error);*/
+
+        // Stop condition: if within 5 degrees
+        if (error < 10 || current - targetAngle < 0) {
+            indexLeft.setPower(0);
+            indexRight.setPower(0);
+            return true; // finished
+        } else {
+            // Move in negative direction only
+            double power = Math.max(0.175, error / 360);
+            indexLeft.setPower(-power);
+            indexRight.setPower(-power);
+            return false; // still moving
+        }
+    }
+
+
+    public double getAngle() {
+        double voltage = spindexerEncoder.getVoltage();
+        return (voltage / 3.3) * 360.0;
+    }
+
+
+    public boolean shoot(double targetAngle) {
+        double current = getAngle();
+        double error = (targetAngle - current + 360) % 360;
+
+        if(error < 10) {
+            indexLeft.setPower(0);
+            indexRight.setPower(0);
+            return true;
+        } else {
+            double power = Math.max(0.175, error / 360);
+            indexLeft.setPower(power);
+            indexRight.setPower(power);
+            return false;
+        }
+    }
 }
