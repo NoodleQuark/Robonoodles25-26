@@ -491,4 +491,164 @@ public class KronkTeleOp extends LinearOpMode {
 
 
 
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+public enum BallColor {
+    PURPLE,
+    GREEN,
+    EMPTY,
+    UNKNOWN
+}
+
+// Tracks the balls in the robot's 3-slot index
+private BallColor[] balls = {BallColor.EMPTY, BallColor.EMPTY, BallColor.EMPTY};
+private int index = 0;                   // Current index position
+private BallColor lastDetectedColor = BallColor.EMPTY;
+
+// Button debounce flag
+private boolean buttonPressed = false;
+
+/**
+ * Detects the color of the ball in the intake
+ * Uses RGB ratios and brightness
+ */
+private BallColor detectBallColor(ColorSensor sensor) {
+    int r = sensor.red();
+    int g = sensor.green();
+    int b = sensor.blue();
+
+    // Minimum brightness check
+    if (sensor.alpha() < 20) {
+        return BallColor.EMPTY;
+    }
+
+    // Purple ball
+    if (b > g * 1.15) {
+        return BallColor.PURPLE;
+    }
+
+    // Green ball
+    if (g > (r + b) / 2.0 + 10) {
+        return BallColor.GREEN;
+    }
+
+    return BallColor.UNKNOWN;
+}
+
+// BALL STORAGE
+/**
+ * Store the last detected ball in the current index slot
+ * then advance to the next empty slot
+ */
+private void storeBall() {
+    balls[index] = lastDetectedColor;
+    lastDetectedColor = BallColor.EMPTY;
+
+    // Find next empty slot
+    for (int i = 1; i <= balls.length; i++) {
+        int next = (index + i) % balls.length;
+        if (balls[next] == BallColor.EMPTY) {
+            index = next;
+            return;
+        }
+    }
+}
+
+// BALL SELECTION
+/**
+ * Select a ball of a specific color in the index
+ * then cycle to that position.
+ */
+private void selectBall(BallColor target) {
+    for (int i = 0; i < balls.length; i++) {
+        if (balls[i] == target) {
+            index = i;
+            return;
+        }
+    }
+}
+
+// LEDS
+/**
+ * Updates the LED colors to display the color of the selected ball 
+ */
+private void updateLEDs(Servo LED, Servo LED2) {
+    switch (balls[index]) {
+        case PURPLE:
+            LED.setPosition(Constants.purple);
+            LED2.setPosition(Constants.purple);
+            break;
+        case GREEN:
+            LED.setPosition(Constants.green);
+            LED2.setPosition(Constants.green);
+            break;
+        default:
+            LED.setPosition(Constants.white);
+            LED2.setPosition(Constants.white);
+            break;
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+// ====== CLEAR SCORED BALL ======
+private void clearBallAfterScore() {
+    balls[index] = BallColor.EMPTY;
+}
+
+// ====== TELEOP LOOP EXAMPLE ======
+public void ballControlLoop(ColorSensor colorSensor, Servo LED, Servo LED2) {
+    // Detect ball color every loop
+    lastDetectedColor = detectBallColor(colorSensor);
+
+    // Store ball when driver presses a
+    if (gamepad2.a && !buttonPressed) {
+        buttonPressed = true;
+        storeBall();
+    }
+
+    //Select purple ball for scoring when x pressed
+    if (gamepad2.x && !buttonPressed) {
+        buttonPressed = true;
+        selectBall(BallColor.PURPLE);
+    }
+
+    //Select green ball for scoring when b pressed
+    if (gamepad2.b && !buttonPressed) {
+        buttonPressed = true;
+        selectBall(BallColor.GREEN);
+    }
+
+    if (!gamepad2.a && !gamepad2.b && !gamepad2.x) buttonPressed = false;
+
+    updateLEDs(LED, LED2);
+
+    if (timer.running && timer.elapsed() >= 800) {
+        clearBallAfterScore();
+        timer.end();
+    }
 }
