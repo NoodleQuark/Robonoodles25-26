@@ -1,16 +1,20 @@
 package org.firstinspires.ftc.teamcode;
 
-
 import com.qualcomm.hardware.bosch.BHI260IMU;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+import com.qualcomm.robotcore.hardware.AnalogInput;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.ColorSensor;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.robotcore.hardware.Servo;
-import org.firstinspires.ftc.teamcode.Constants;
+import static org.firstinspires.ftc.teamcode.Prism.GoBildaPrismDriver.LayerHeight;
+import org.firstinspires.ftc.teamcode.Prism.Color;
+import org.firstinspires.ftc.teamcode.Prism.GoBildaPrismDriver;
+import org.firstinspires.ftc.teamcode.Prism.PrismAnimations;
+import com.qualcomm.robotcore.hardware.VoltageSensor;
 
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 
@@ -20,7 +24,7 @@ public class KronkTeleOp extends LinearOpMode {
 
 
 
-
+    double shootAngle;
     private DcMotor frontright;
     private DcMotor backright;
     private DcMotor backleft;
@@ -29,16 +33,30 @@ public class KronkTeleOp extends LinearOpMode {
     private DcMotor flywheelLeft;
     private DcMotor intake;
     private DcMotor turret;
-    private Servo indexRight;
-    private Servo indexLeft;
+    private CRServo indexRight;
+    private CRServo indexLeft;
     //This is the Gobuilda RGB Indicator it's just mapped as servo
     private Servo LED;
     private Servo LED2;
-    private CRServo transferRight;
-    private CRServo transferLeft;
     private ColorSensor colorSensor;
+    private ColorSensor leftColor;
+    private ColorSensor rightColor;
+
     private BHI260IMU imu;
     private SimplifiedOdometryRobot odometry;
+    private AnalogInput spindexerEncoder;
+    private VoltageSensor voltageSensor;
+    private double startAngle = 0;
+    private long sortTime = 0;
+    private int index = 0;
+
+
+    GoBildaPrismDriver prism;
+
+    PrismAnimations.Solid white = new PrismAnimations.Solid(Color.WHITE);
+    PrismAnimations.Solid red = new PrismAnimations.Solid(Color.RED);
+    PrismAnimations.Solid solid;
+    PrismAnimations.Solid prevColor;
 
 
 
@@ -52,18 +70,39 @@ public class KronkTeleOp extends LinearOpMode {
         double magnitudeR;
         double Powervary = 1;
         double magnitudeL;
-        double odoY;
-        double odoX;
-        int index = 0;
+        double currentAngle = 0;
+        double flywheelPower = 0;
+        double firePower = 0;
         long LTime = System.currentTimeMillis();
+        long fireTime = 0;
         boolean dpadPressed = false;
         boolean startPressed = false;
         boolean buttonPressed = false;
+        boolean rightStickButt = false;
         boolean tank = true;
-        boolean up = false;
+        int prevIndex;
+        int autoFireIndex = 0;
+        int shootState = -1;
+        boolean cycle = true;
+        boolean case0 = false;
+        boolean rightBumperPressed = true;
+        boolean shooting = true;
+        boolean aPressed = false;
+        boolean xPressed = false;
+        boolean bPressed = false;
+        boolean yPressed = false;
+        boolean leftBumperPressed = false;
+        boolean firing = false;
+        long firetime = 0;
+        int shotDistance = 0;
+        double time = 0;
+        double startTime = System.currentTimeMillis();
+        double flywheelOffset = 0;
+        double flywheelOffset2 = 0;
+        boolean leftStickButt = false;
 
-        String lastColor = null;
-        String[] balls = {"empty", "empty", "empty"};
+        String lastColor = "empty";
+        String[] sort = {"empty", "empty", "empty"};
 
         double targetHeading = 0;
         double kP = 3.5;
@@ -77,14 +116,30 @@ public class KronkTeleOp extends LinearOpMode {
         turret = hardwareMap.get(DcMotor.class, "turret");
         flywheelRight = hardwareMap.get(DcMotor.class, "flywheelRight");
         flywheelLeft = hardwareMap.get(DcMotor.class, "flywheelLeft");
-        indexRight = hardwareMap.get(Servo.class, "indexRight");
-        indexLeft = hardwareMap.get(Servo.class, "indexLeft");
-        transferRight = hardwareMap.get(CRServo.class, "transferRight");
-        transferLeft = hardwareMap.get(CRServo.class, "transferLeft");
+        indexRight = hardwareMap.get(CRServo.class, "indexRight");
+        indexLeft = hardwareMap.get(CRServo.class, "indexLeft");
 
         LED = hardwareMap.get(Servo.class, "LED");
         LED2 = hardwareMap.get(Servo.class, "LED2");
+        prism = hardwareMap.get(GoBildaPrismDriver.class,"prism");
         colorSensor = hardwareMap.get(ColorSensor.class, "color");
+        leftColor = hardwareMap.get(ColorSensor.class, "leftColor");
+        rightColor = hardwareMap.get(ColorSensor.class, "rightColor");
+        voltageSensor = hardwareMap.get(VoltageSensor.class, "Control Hub");
+
+        spindexerEncoder = hardwareMap.get(AnalogInput.class, "spindexerEncoder");
+
+
+
+        prism.setStripLength(35);
+
+
+        white.setBrightness(100);
+        white.setStartIndex(0);
+        white.setStopIndex(36);
+        red.setBrightness(100);
+        red.setStartIndex(0);
+        red.setStopIndex(36);
 
 
         odometry = new SimplifiedOdometryRobot(this);
@@ -113,6 +168,7 @@ public class KronkTeleOp extends LinearOpMode {
             Powervary = 1;
             while (opModeIsActive()) {
 
+
                 //Sensors
                 if(gamepad1.back){
                     //imu.initialize(parameters);
@@ -126,16 +182,43 @@ public class KronkTeleOp extends LinearOpMode {
 
                 telemetry.addLine(tank ? "TANK DRIVE" : "FIELD CENTRIC DRIVE");
 
+                lastColor = sort[0];
 
-                if(colorSensor.blue() > colorSensor.green()){
+                telemetry.addLine("1: ");
+                if(colorSensor.blue() < 150 && colorSensor.green() < 150){
+                    sort[0] = "empty";
+                }else if(colorSensor.blue() > colorSensor.green()){
                     telemetry.addLine("purple");
-                    lastColor = "purple";
+                    sort[0] = "purple";
                 } else if (colorSensor.green() > 15+(colorSensor.red() + colorSensor.blue())/2) {
                     telemetry.addLine("green");
-                    lastColor = "green";
-                }else {
-                    telemetry.addLine("no ball");
+                    sort[0] = "green";
                 }
+
+                telemetry.addLine("2: ");
+                if(leftColor.blue() < 150 && leftColor.green() < 150){
+                    sort[1] = "empty";
+                }else
+                if(leftColor.blue() > leftColor.green()){
+                    telemetry.addLine("purple");
+                    sort[1] = "purple";
+                } else if (leftColor.green() > 15+(leftColor.red() + leftColor.blue())/2) {
+                    telemetry.addLine("green");
+                    sort[1] = "green";
+                }
+
+                telemetry.addLine("3: ");
+                if(rightColor.blue() < 150 && rightColor.green() < 150){
+                    sort[2] = "empty";
+                }else
+                if(rightColor.blue() > rightColor.green()){
+                    telemetry.addLine("purple");
+                    sort[2] = "purple";
+                } else if (rightColor.green() > 15+(rightColor.red() + rightColor.blue())/2) {
+                    telemetry.addLine("green");
+                    sort[2] = "green";
+                }
+
 
                 //Drivebase
 
@@ -182,11 +265,11 @@ public class KronkTeleOp extends LinearOpMode {
                 backRightPower  /= max;
 
 
-                if (tank) {
+                if (tank && !gamepad1.dpad_up) {
                     telemetry.addLine("TANKY");
-                    double rightStickX = -gamepad1.right_stick_x;
+                    double rightStickX = gamepad1.right_stick_x;
                     double rightStickY = gamepad1.right_stick_y;
-                    double leftStickX  = -gamepad1.left_stick_x;
+                    double leftStickX  = gamepad1.left_stick_x;
                     double leftStickY  = gamepad1.left_stick_y;
 
                     magnitudeR = Math.sqrt(Math.pow(rightStickX, 2) + Math.pow(rightStickY, 2));
@@ -227,24 +310,13 @@ public class KronkTeleOp extends LinearOpMode {
                         backleft.setPower(Powervary * -1 * magnitudeL * (1 + 2 * leftStickX));
                     }
 
-                } else {
+                } else if(!gamepad1.dpad_up){
                     frontleft.setPower(frontLeftPower * Powervary);
                     backleft.setPower(backLeftPower * Powervary);
                     frontright.setPower(frontRightPower * Powervary);
                     backright.setPower(backRightPower * Powervary);
                 }
 
-
-                /*if(Math.abs(gamepad1.left_stick_y) != 0 || gamepad1.right_stick_button){
-                    frontleft.setPower(-gamepad1.left_stick_y);
-                    backleft.setPower(-gamepad1.left_stick_y);
-                    frontright.setPower(-gamepad1.right_stick_y);
-                    backright.setPower(-gamepad1.right_stick_y);
-                }
-                if(Math.abs(gamepad1.left_stick_x) != 0 && Math.abs(gamepad1.right_stick_y) == 0){
-                    frontright.setPower(-gamepad1.left_stick_x);
-                    backright.setPower(-gamepad1.left_stick_x);
-                }*/
 
 
                 if (gamepad1.a) {
@@ -259,185 +331,234 @@ public class KronkTeleOp extends LinearOpMode {
                 if (gamepad1.y) {
                     Powervary = 1;
                 }
+                time = System.currentTimeMillis()-startTime;
+
+
+
+
+
+
+
+
+
+
 
                 //Outtake
 
 
-
-                /*if(gamepad2.x)index=1;
-                if(gamepad2.y)index=2;
-                if (gamepad2.b)index=3;*/
-
-                /*if(gamepad1.dpad_up){
+                if(gamepad1.dpad_up){
                     frontleft.setPower(1);
                     frontright.setPower(1);
                     backright.setPower(1);
                     backleft.setPower(1);
-                }*/
+                }
 
                 //spin to next
-                if(gamepad2.y && !buttonPressed){
-                    buttonPressed = true;
+                prevIndex = index;
+
+                if(gamepad2.y && !yPressed){
+                    index--;
+                    startAngle = getAngle();
+                    if(index<0)index = 2;
+                    shooting = true;
+                    cycle = false;
+                    sortTime = System.currentTimeMillis();
+                }
+                yPressed = gamepad2.y;
+
+                if (gamepad2.a && !aPressed){
+                    for (int i = 0; i<=2; i++){
+                        if (sort[i].equals("empty")){
+                            index = i;
+                        }
+                    }
+
+                }
+                aPressed = gamepad2.a;
+
+
+                if (gamepad2.b && !bPressed){
+                    for (int i = 0; i<=2; i++){
+                        if (sort[i].equals("purple")){
+                            index = i;
+                        }
+                    }
+
+                }
+                bPressed = gamepad2.b;
+
+                if (gamepad2.x && !xPressed){
+                    for (int i = 0; i<=2; i++){
+                        if (sort[i].equals("green")){
+                            index = i;
+                        }
+                    }
+                }
+                xPressed = gamepad2.x;
+
+                if(!cycle && shooting){
+                    switch (index){
+                        case 0: cycle = sort(78); break;
+                        case 1: cycle = sort(195); break;
+                        case 2: cycle = sort(317); break;
+                    }
+                }
+
+
+
+
+
+
+                //shoot
+                if (gamepad2.right_bumper && !rightBumperPressed){
+                    /*startAngle = getAngle();
+                    cycle = true;
+                    shooting = false;
+                    index++;
+                    if(index>2)index = 0;*/
+                    if(firing){
+                        firing = false;
+                        indexLeft.setPower(0);
+                        indexRight.setPower(0);
+                        switch (shotDistance){
+                            case 0:
+                                flywheelPower = -0.4;
+                                break;
+                            case 1:
+                                flywheelPower = -0.425;
+                                break;
+                            case 2:
+                                flywheelPower = -0.5;
+                                break;
+                            case 3:
+                                flywheelPower = -1;
+                                break;
+                        }
+
+                    }else{
+                        firing = true;
+                        firetime = System.currentTimeMillis();
+                        firePower = flywheelRight.getPower();
+                        indexLeft.setPower(1);
+                        indexRight.setPower(1);
+                    }
+
+                }
+
+                if(firing){
+                    switch(shotDistance){
+                        case 0:
+                            if(System.currentTimeMillis() - fireTime > 350){
+                                flywheelPower = (firePower - 0.475);
+                            }else if(System.currentTimeMillis() - fireTime > 50){
+                                flywheelPower = (firePower - 0.1);
+                            }
+                            break;
+                        case 1 :
+                            if(System.currentTimeMillis() - fireTime > 350){
+                                flywheelPower = (firePower - 0.575);
+                            }else if(System.currentTimeMillis() - fireTime > 50){
+                                flywheelPower = (firePower - 0.1);
+                            }
+                            break;
+                        case 2 :
+                            if(System.currentTimeMillis() - fireTime > 350){
+                                flywheelPower = (firePower - 0.575);
+                            }else if(System.currentTimeMillis() - fireTime > 50){
+                                flywheelPower = (firePower - 0.125);
+                            }
+                            break;
+                        case 3 :
+                            if(System.currentTimeMillis() - fireTime > 350){
+                                flywheelPower = (firePower - 0.575);
+                            }else if(System.currentTimeMillis() - fireTime > 50){
+                                flywheelPower = (firePower - 0.1);
+                            }
+                            break;
+                    }
+
+                }
+
+                rightBumperPressed = gamepad2.right_bumper;
+
+                if (gamepad2.left_bumper && !leftBumperPressed){
+                    startAngle = getAngle();
+                    cycle = true;
+                    shooting = false;
                     index++;
                     if(index>2)index = 0;
+                    sortTime = System.currentTimeMillis();
                 }
 
-                //pressed after collection to spin to empty and store ball in data
-                if (gamepad2.a && !buttonPressed) {
-                    buttonPressed = true;
-                    balls[index] = lastColor == null ? "?" : lastColor;
-                    lastColor = null;
+                leftBumperPressed = gamepad2.left_bumper;
 
-                    int next = (index + 1) % 3;
-                    int next2 = (index + 2) % 3;
-
-                    if (balls[next].equals("empty")) {
-                        index = next;
-                    } else if (balls[next2].equals("empty")) {
-                        index = next2;
+                if (!shooting && cycle){
+                    switch (index){
+                        case 0: shooting = shoot(120); break;
+                        case 1: shooting = shoot(240); break;
+                        case 2: shooting = shoot(360); break;
                     }
                 }
 
-                //spin to purple
-                if(gamepad2.x && !buttonPressed){
-                    buttonPressed = true;
-                    for(int i = 0; i<3; i++){
-                        if(!balls[i].equals("empty"))index = i;
-                        if(balls[i].equals("purple")){
-                            index = i;
-                            break;
-                        }
-                    }
-                }
-                //spin to green
-                if(gamepad2.b && !buttonPressed){
-                    buttonPressed = true;
-                    for(int i = 0; i<3; i++){
-                        if(!balls[i].equals("empty"))index = i;
-                        if(balls[i].equals("green")){
-                            index = i;
-                            break;
-                        }
-                    }
-                }
-                if (!gamepad2.a && !gamepad2.b && !gamepad2.x && !gamepad2.y) {
-                    buttonPressed = false;
-                }
 
-                switch (balls[index]){
-                    case "purple":
-                        LED.setPosition(Constants.purple);
-                        LED2.setPosition(Constants.purple);
-                        break;
-                    case "green":
-                        LED.setPosition(Constants.green);
-                        LED2.setPosition(Constants.green);
-                        break;
-                    case"empty":
-                        LED.setPosition(Constants.white);
-                        LED2.setPosition(Constants.white);
-                        break;
-                }
-
-                /*if(!gamepad1.dpad_left && ! gamepad1.dpad_right)dpadPressed = false;
-                if(gamepad1.dpad_right && !dpadPressed){
-                    index++;
-                    dpadPressed = true;
-                }
-                if(gamepad1.dpad_left && !dpadPressed){
-                    dpadPressed = true;
-                    index--;
-                }
-                if(index>3)index = 1;
-                if(index<1)index=3;*/
-                switch (index){
-                    case 0:
-                        indexLeft.setPosition(Constants.indexPosition1);
-                        indexRight.setPosition(Constants.indexPosition1);
-                        break;
-                    case 1:
-                        indexLeft.setPosition(Constants.indexPosition2);
-                        indexRight.setPosition(Constants.indexPosition2);
-                        break;
-                    case 2:
-                        indexLeft.setPosition(Constants.indexPosition3);
-                        indexRight.setPosition(Constants.indexPosition3);
-                        break;
-
-                }
-                telemetry.addData("indexRight", indexRight.getPosition());
-                telemetry.addData("indexLeft", indexLeft.getPosition());
-
-                //Rack and Pinions
+//LEDS
 
 
-                if(up && gamepad2.leftBumperWasPressed())timer.start();
-                if(gamepad2.leftBumperWasReleased() && timer.running)timer.pause();
-                if(gamepad2.leftBumperWasPressed() && timer.running)timer.resume();
 
-                if(timer.running && timer.elapsed() >= 800){
-                    balls[index] = "empty";
-                    timer.end();
-                }
-                telemetry.addData("timer", timer.elapsed());
-
-                if(gamepad2.right_bumper){
-                    transferLeft.setPower(1);
-                    transferRight.setPower(-1);
-                } else if (gamepad2.left_bumper){
-                    transferLeft.setPower(-1);
-                    transferRight.setPower(1);
-                }else{
-                    transferLeft.setPower(0);
-                    transferRight.setPower(0);
-                }
-
-                if(gamepad2.right_bumper && !up){
-                    up = true;
-                } else if (gamepad2.left_bumper && up) {
-                    up = false;
-                }
+                telemetry.addData("indexRight", indexRight.getPower());
+                telemetry.addData("indexLeft", indexLeft.getPower());
 
 
 
 
 
                 //Turret
-                turret.setPower(0.5*gamepad2.right_stick_x);
+                //turret.setPower(0.5*gamepad2.right_stick_x);
+                if(gamepad2.right_stick_button && flywheelRight.getPower() != 0 && !rightStickButt){
+                    flywheelOffset2 -= 0.005;
+                }
+                rightStickButt = gamepad2.right_stick_button;
 
                 //Flywheels
                 if (!dpadPressed &&
-                        ((Math.abs(flywheelLeft.getPower()+1) <= 0.05 && gamepad2.dpad_up) ||
-                                (Math.abs(flywheelLeft.getPower()+Constants.flywheelClose) <= 0.05 && gamepad2.dpad_down) ||
-                                (Math.abs(flywheelLeft.getPower()+Constants.flywheelMiddle) <= 0.05 && gamepad2.dpad_right) ||
-                                (Math.abs(flywheelLeft.getPower()+Constants.flywheelMiddle) <= 0.05 && gamepad2.dpad_left))) {
-                    flywheelLeft.setPower(0);
-                    flywheelRight.setPower(0);
+                        (
+                                (shotDistance == 3 && gamepad2.dpad_up) ||
+                                (shotDistance == 0 && gamepad2.dpad_down) ||
+                                (shotDistance == 1 && gamepad2.dpad_right) ||
+                                (shotDistance == 2 && gamepad2.dpad_left))) {
+                    flywheelPower = 0;
+                    shotDistance = -1;
                 } else if (gamepad2.dpad_down && !dpadPressed) {
-                    flywheelLeft.setPower(Constants.flywheelClose);
-                    flywheelRight.setPower(Constants.flywheelClose);
+                    flywheelPower = -0.4;
+                    shotDistance = 0;
                 } else if (gamepad2.dpad_right && !dpadPressed) {
-                    flywheelLeft.setPower(Constants.flywheelMiddle);
-                    flywheelRight.setPower(Constants.flywheelMiddle);
+                    flywheelPower = -0.425;
+                    shotDistance = 1;
                 } else if (gamepad2.dpad_left && !dpadPressed) {
-                    flywheelLeft.setPower(Constants.flywheelMiddle);
-                    flywheelRight.setPower(Constants.flywheelMiddle);
+                    flywheelPower = -0.5;
+                    shotDistance = 2;
                 } else if (gamepad2.dpad_up && !dpadPressed){
-                    flywheelLeft.setPower(Constants.flywheelFar);
-                    flywheelRight.setPower(Constants.flywheelFar);
+                    flywheelPower = -1;
+                    shotDistance = 3;
                 }
                 if(gamepad2.right_trigger != 0){
-                    flywheelRight.setPower(-gamepad2.right_trigger);
-                    flywheelLeft.setPower(-gamepad2.right_trigger);
+                    flywheelPower = 0.25;
                 } else if (gamepad2.left_trigger != 0) {
-                    flywheelRight.setPower(0);
-                    flywheelLeft.setPower(0);
+                    flywheelPower = 0;
                 }
+
+                flywheelOffset = Math.max(((time / 120000) * -0.05), -0.05);
+                flywheelLeft.setPower(flywheelPower == 0 ? 0 : flywheelOffset + flywheelPower + flywheelOffset2);
+                flywheelRight.setPower(flywheelPower == 0 ? 0 :flywheelOffset + flywheelPower + flywheelOffset2);
+                telemetry.addData("offset", flywheelOffset);
+
                 if(!gamepad2.dpad_left && !gamepad2.dpad_up && !gamepad2.dpad_right && !gamepad2.dpad_down){
                     dpadPressed = false;
                 }else{
                     dpadPressed = true;
                 }
+
+
                 telemetry.addData("dpadPressed", dpadPressed);
 
                 telemetry.addData("flywheel power", flywheelLeft.getPower());
@@ -446,11 +567,22 @@ public class KronkTeleOp extends LinearOpMode {
 
                 if(gamepad2.left_stick_y < 0){ // ball in
                     intake.setPower(-1);
+                    solid = white;
                 } else if(gamepad2.left_stick_y > 0){ // ball out
                     intake.setPower(1);
+                    solid = red;
                 } else if(gamepad2.left_stick_button){
                     intake.setPower(0);
+                    solid = red;
                 }
+                if(prevColor != solid){
+                    prevColor = solid;
+                    prism.clearAllAnimations();
+                    prism.insertAndUpdateAnimation(LayerHeight.LAYER_0, solid);
+                }
+
+
+
 
                 // Telemetry
 
@@ -466,16 +598,22 @@ public class KronkTeleOp extends LinearOpMode {
                 telemetry.addData("Time:", (System.currentTimeMillis()-LTime)/1000);
                 telemetry.addData("Speed:", Powervary);
                 telemetry.addLine("Joystick Tank Field Centric Drive \n Letter Buttons for speed limit \n Speed: " + Powervary);
-                telemetry.addData("Index 1: ", balls[0]);
-                telemetry.addData("Index 2: ", balls[1]);
-                telemetry.addData("Index 3: ", balls[2]);
+                telemetry.addData("Index 1: ", sort[0]);
+                telemetry.addData("Index 2: ", sort[1]);
+                telemetry.addData("Index 3: ", sort[2]);
+                telemetry.addData("Spindexer Angle: ", getAngle());
+                telemetry.addData("Spindexer Voltage(3.3): ", spindexerEncoder.getVoltage());
+                telemetry.addData("index", index);
 
 
                 telemetry.addData(" \n\n\n Clear", colorSensor.alpha());
                 telemetry.addData("Red  ", colorSensor.red());
                 telemetry.addData("Green", colorSensor.green());
                 telemetry.addData("Blue ", colorSensor.blue());
-
+                telemetry.addData("FrontRight", frontright.getCurrentPosition());
+                telemetry.addData("FrontLeft", frontleft.getCurrentPosition());
+                telemetry.addData("BackRight", backright.getCurrentPosition());
+                telemetry.addData("BackLeft", backleft.getCurrentPosition());
 
 
                 telemetry.update();
@@ -488,167 +626,76 @@ public class KronkTeleOp extends LinearOpMode {
         while (angle < -Math.PI) angle += 2.0 * Math.PI;
         return angle;
     }
-
-
-
-
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-public enum BallColor {
-    PURPLE,
-    GREEN,
-    EMPTY,
-    UNKNOWN
-}
-
-// Tracks the balls in the robot's 3-slot index
-private BallColor[] balls = {BallColor.EMPTY, BallColor.EMPTY, BallColor.EMPTY};
-private int index = 0;                   // Current index position
-private BallColor lastDetectedColor = BallColor.EMPTY;
-
-// Button debounce flag
-private boolean buttonPressed = false;
-
-/**
- * Detects the color of the ball in the intake
- * Uses RGB ratios and brightness
- */
-private BallColor detectBallColor(ColorSensor sensor) {
-    int r = sensor.red();
-    int g = sensor.green();
-    int b = sensor.blue();
-
-    // Minimum brightness check
-    if (sensor.alpha() < 20) {
-        return BallColor.EMPTY;
+    public double getAngle() {
+        double voltage = spindexerEncoder.getVoltage();
+        return (voltage / 3.3) * 360.0;
     }
 
-    // Purple ball
-    if (b > g * 1.15) {
-        return BallColor.PURPLE;
-    }
 
-    // Green ball
-    if (g > (r + b) / 2.0 + 10) {
-        return BallColor.GREEN;
-    }
 
-    return BallColor.UNKNOWN;
-}
+    //Spins only right as to sort without firing a ball
 
-// BALL STORAGE
-/**
- * Store the last detected ball in the current index slot
- * then advance to the next empty slot
- */
-private void storeBall() {
-    balls[index] = lastDetectedColor;
-    lastDetectedColor = BallColor.EMPTY;
+    public boolean sort(double targetAngle) {
+        double current = getAngle();
+        double error = (((current - targetAngle) + 360) % 360);
+        telemetry.addData("current", current);
+        telemetry.addData("tart", targetAngle);
+        telemetry.addData("comp", (((current - targetAngle) + 360)));
+        telemetry.addData("error", error);
 
-    // Find next empty slot
-    for (int i = 1; i <= balls.length; i++) {
-        int next = (index + i) % balls.length;
-        if (balls[next] == BallColor.EMPTY) {
-            index = next;
-            return;
+        // Stop condition: if within 5 degrees
+        if (error < 10 || (current - targetAngle < 0 && targetAngle == 78) || (targetAngle == 195 && current - targetAngle < 0) || (targetAngle == 317 && current > 245 && current < 317)) {
+            indexLeft.setPower(0);
+            indexRight.setPower(0);
+            return true; // finished
+        } else {
+            // Move in negative direction only
+            double power = System.currentTimeMillis() - sortTime > 20 ? Math.max(0.1, error / 360) : 1;
+            indexLeft.setPower(-power);
+            indexRight.setPower(-power);
+            return false; // still moving
         }
     }
-}
 
-// BALL SELECTION
-/**
- * Select a ball of a specific color in the index
- * then cycle to that position.
- */
-private void selectBall(BallColor target) {
-    for (int i = 0; i < balls.length; i++) {
-        if (balls[i] == target) {
-            index = i;
-            return;
+
+
+
+
+    //Spins only left to fire ball
+    public boolean shoot(double targetAngle) {
+        /*double current = getAngle();
+        double error = (targetAngle - current + 360) % 360;
+        telemetry.addData("current", current);
+        telemetry.addData("tart", targetAngle);
+        telemetry.addData("comp", (((current - targetAngle) + 360)));
+        telemetry.addData("error", error);
+        if(error < 10 || error > 160) {
+            indexLeft.setPower(0);
+            indexRight.setPower(0);
+            return true;
+        } else {
+            double power = Math.max(0.175, error / 360);
+            indexLeft.setPower(power);
+            indexRight.setPower(power);
+            return false;
+        }*/
+        if(System.currentTimeMillis() - sortTime < 120){
+            indexLeft.setPower(1);
+            indexRight.setPower(1);
+            return false;
+        }else {
+            indexLeft.setPower(0);
+            indexRight.setPower(0);
+            return true;
         }
-    }
-}
 
-// LEDS
-/**
- * Updates the LED colors to display the color of the selected ball 
- */
-private void updateLEDs(Servo LED, Servo LED2) {
-    switch (balls[index]) {
-        case PURPLE:
-            LED.setPosition(Constants.purple);
-            LED2.setPosition(Constants.purple);
-            break;
-        case GREEN:
-            LED.setPosition(Constants.green);
-            LED2.setPosition(Constants.green);
-            break;
-        default:
-            LED.setPosition(Constants.white);
-            LED2.setPosition(Constants.white);
-            break;
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-// ====== CLEAR SCORED BALL ======
-private void clearBallAfterScore() {
-    balls[index] = BallColor.EMPTY;
-}
-
-// ====== TELEOP LOOP EXAMPLE ======
-public void ballControlLoop(ColorSensor colorSensor, Servo LED, Servo LED2) {
-    // Detect ball color every loop
-    lastDetectedColor = detectBallColor(colorSensor);
-
-    // Store ball when driver presses a
-    if (gamepad2.a && !buttonPressed) {
-        buttonPressed = true;
-        storeBall();
     }
 
-    //Select purple ball for scoring when x pressed
-    if (gamepad2.x && !buttonPressed) {
-        buttonPressed = true;
-        selectBall(BallColor.PURPLE);
+    public double angleDifference(double targetAngle) {
+        return (targetAngle - getAngle()) < 0 ? targetAngle - getAngle() + 360 : targetAngle - getAngle();
     }
 
-    //Select green ball for scoring when b pressed
-    if (gamepad2.b && !buttonPressed) {
-        buttonPressed = true;
-        selectBall(BallColor.GREEN);
-    }
 
-    if (!gamepad2.a && !gamepad2.b && !gamepad2.x) buttonPressed = false;
 
-    updateLEDs(LED, LED2);
 
-    if (timer.running && timer.elapsed() >= 800) {
-        clearBallAfterScore();
-        timer.end();
-    }
 }
